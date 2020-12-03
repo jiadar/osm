@@ -1,3 +1,4 @@
+"""
 from functools import wraps
 import time
 from typing import Any
@@ -483,3 +484,4 @@ if __name__ == "__main__":
 
     # plot(data, path)
     topo.plot().show()
+"""

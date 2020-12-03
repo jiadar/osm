@@ -1,9 +1,7 @@
 from functools import wraps
 import time
 from typing import Any
-import itertools
 import json
-import math
 import matplotlib.pyplot as plt
 from pprint import pprint
 from queue import PriorityQueue, Queue
@@ -56,7 +54,7 @@ def get_data():
 class Edge:
     vertex: Any
     m: float = 0
-    weight: float = 0
+    weight: float = 1
 
 
 @dataclasses.dataclass(order=True)
@@ -74,232 +72,33 @@ class Distance:
     vertex: Any = dataclasses.field(compare=False)
 
 
-@dataclasses.dataclass
-class Segment:
-    p1: Any
-    p2: Any
-    lineq: Any = None
-    m: float = 0
-    c: float = 0
-    eqn: str = ""
-    dv: str = "x"
-
-
-@dataclasses.dataclass
-class Line:
-    start: Any
-    end: Any
-    lineq: Any = None
-    eqn: str = ""
-    m: float = 0
-    dv: str = "x"
-
-
-@dataclasses.dataclass
-class SimpleLine:
-    start: Any
-    end: Any
-    eqn: Any = None
-    m: Any = None
-
-
 class Graph:
     data = []
+    graph = {}
+    lines = []
+
+    def __add_lines_to_graph(self, lines):
+        # Add the lines to the graph
+        self.lines = lines
+        for line in lines:
+            for idx in range(len(line)):
+                self.add_vertex(line[idx])
+                if idx > 0:
+                    edge = (line[idx - 1], line[idx])
+                    self.add_edge(edge)
+
+            line.reverse()
+
+            for idx in range(len(line)):
+                self.add_vertex(line[idx])
+                if idx > 0:
+                    edge = (line[idx - 1], line[idx])
+                    self.add_edge(edge)
 
     @timeit
     def __init__(self, data):
-        self.data = data
-        self.lines = [[(item[0], item[1]) for item in line] for line in data]
-
-        # 0.2 ms
-        def add_lines_to_graph():
-            # Add the lines to the graph
-            for line in self.lines:
-                for idx in range(len(line)):
-                    # Add the vertex using the current index, the first element is not connected to anything yet
-                    self.add_vertex(line[idx])
-                    # Add the edge. If we have more than 1 element, there is an edge connecting to the former element
-                    if idx > 0:
-                        edge = (line[idx - 1], line[idx])
-                        self.add_edge(edge)
-
-                # Traverse the line in reverse and add the edges, since the graph is undirected we must have edges
-                # pointing both ways to route
-                line.reverse()
-                for idx in range(len(line)):
-                    # Add the vertex using the current index, the first element is not connected to anything yet
-                    self.add_vertex(line[idx])
-                    # Add the edge. If we have more than 1 element, there is an edge connecting to the former element
-                    if idx > 0:
-                        edge = (line[idx - 1], line[idx])
-                        self.add_edge(edge)
-
-        add_lines_to_graph()
-
-        # 0.2 ms
-        def add_edges_to_graph():
-            for vertex, edges in self.graph.items():
-                for edge in edges:
-                    (x1, y1) = vertex
-                    (x2, y2) = edge.vertex
-                    segment = Segment(p1=vertex, p2=edge.vertex, m=edge.m)
-                    if self.segment_map.get(edge.m):
-                        self.segment_map[edge.m].append(segment)
-                    else:
-                        self.segment_map[edge.m] = [segment]
-                    self.segments.append(segment)
-
-        add_edges_to_graph()
-
-        def make_segment_map():
-            # Go through each slope and make linear equation to match all segments possible on that line
-            for m in self.segment_map.keys():
-                for segment in self.segment_map[m]:
-                    (x1, y1) = segment.p1
-                    if m == 0:
-                        segment.eqn = f"y = {y1}"
-                        segment.c = 0
-                        segment.dv = "x"
-                        segment.lineq = (0, 1, y1)
-                    elif m < float("inf"):
-                        c = y1 + m * x1 * -1
-                        sign = "-" if c < 0 else "+"
-                        segment.eqn = f"y = {m}x {sign} {abs(c)}"
-                        segment.c = c
-                        segment.dv = "x"
-                        segment.lineq = (-1 * m, 1, c)
-                    else:
-                        segment.eqn = f"x = {x1}"
-                        segment.c = 0
-                        segment.dv = "y"
-                        segment.lineq = (1, 0, x1)
-
-        make_segment_map()
-
-        def eqns_from_segments():
-            self.eqns = [
-                segment
-                for segment_lst in self.segment_map.values()
-                for segment in segment_lst
-            ]
-
-        self.eqns = eqns_from_segments()
-
-        # Finally, make the equations and ranges
-
-        # 0.06 ms
-        def make_ranges():
-            for segment in self.segments:
-                if self.eqns_dict.get(segment.eqn):
-                    self.eqns_dict[segment.eqn].append(
-                        Line(
-                            start=segment.p1,
-                            end=segment.p2,
-                            eqn=segment.eqn,
-                            m=segment.m,
-                            dv=segment.dv,
-                            lineq=segment.lineq,
-                        )
-                    )
-                else:
-                    self.eqns_dict[segment.eqn] = [
-                        Line(
-                            start=segment.p1,
-                            end=segment.p2,
-                            eqn=segment.eqn,
-                            m=segment.m,
-                            dv=segment.dv,
-                            lineq=segment.lineq,
-                        )
-                    ]
-
-        make_ranges()
-
-        def get_intersection(l1, l2):
-            a1, b1, c1 = l1
-            a2, b2, c2 = l2
-            det = a1 * b2 - a2 * b1
-            if det == 0:
-                return None
-            x = (c1 * b2 - c2 * b1) / det
-            y = (a1 * c2 - a2 * c1) / det
-            return (x, y)
-
-        # 0.2 ms
-        self.final = []
-
-        def make_final():
-            for eq in self.eqns_dict.keys():
-                start_range = None
-                end_range = None
-                for zl in self.eqns_dict[eq]:
-                    if start_range is None:
-                        if zl.dv == "y":
-                            start_range = min(zl.start[1], zl.end[1])
-                            end_range = max(zl.start[1], zl.end[1])
-                        else:
-                            start_range = min(zl.start[0], zl.end[0])
-                            end_range = max(zl.start[0], zl.end[0])
-                    else:
-                        if zl.dv == "y":
-                            start_range = min([zl.start[1], zl.end[1], start_range])
-                            end_range = max([zl.start[1], zl.end[1], end_range])
-                        else:
-                            start_range = min([zl.start[0], zl.end[0], start_range])
-                            end_range = max([zl.start[0], zl.end[0], end_range])
-                soln = None
-                if zl.dv == "x":
-                    x = start_range
-                    a, b, c = zl.lineq
-                    soln = (c - x * a) / b
-                    start_pt = (x, soln)
-                    x = end_range
-                    soln = (c - x * a) / b
-                    end_pt = (x, soln)
-                else:
-                    y = start_range
-                    a, b, c = zl.lineq
-                    soln = (c - y * b) / a
-                    start_pt = (soln, y)
-                    y = end_range
-                    soln = (c - y * b) / a
-                    end_pt = (soln, y)
-                self.final.append(
-                    SimpleLine(start=start_pt, end=end_pt, eqn=zl.lineq, m=zl.m)
-                )
-                start_range = None
-                end_range = None
-
-        make_final()
-        # 0.02 ms
-
-        # 0.12 ms
-        def get_intersection_set():
-            intersection_set = set()
-            for pql in itertools.combinations(self.final, 2):
-                c1, c2 = pql
-                isc = get_intersection(c1.eqn, c2.eqn)
-                if isc:
-                    x, y = isc
-                    x1, y1 = pql[0].start
-                    x2, y2 = pql[0].end
-                    x3, y3 = pql[1].start
-                    x4, y4 = pql[1].end
-                    within_bounds = (
-                        x >= min(x1, x2)
-                        and x <= max(x1, x2)
-                        and y >= min(y1, y2)
-                        and y <= max(y1, y2)
-                        and x >= min(x3, x4)
-                        and x <= max(x3, x4)
-                        and y >= min(y3, y4)
-                        and y <= max(y3, y4)
-                    )
-                    if within_bounds:
-                        intersection_set.add(isc)
-            return list(intersection_set)
-
-        self.intersections = get_intersection_set()
+        lines = [[(item[0], item[1]) for item in line] for line in data]
+        self.__add_lines_to_graph(lines)
 
     def vertices(self):
         return list(self.graph.keys())
@@ -307,34 +106,17 @@ class Graph:
     def add_vertex(self, vertex):
         if vertex not in self.graph:
             self.graph[vertex] = []
-            self.degrees[vertex] = 0
-
-    def distance_between(self, vertex1, vertex2):
-        return round(math.dist([vertex1[0], vertex1[1]], [vertex2[0], vertex2[1]]), 2)
-
-    def slope(self, vertex1, vertex2):
-        (x1, y1) = vertex1
-        (x2, y2) = vertex2
-        if x1 == x2:
-            return float("inf")
-        if y1 == y2:
-            return 0
-        return round((y2 - y1) / (x2 - x1), 3)
 
     def add_edge(self, edge):
         if len(edge) < 2:
             return
         (vertex1, vertex2) = edge
-        weight = self.distance_between(vertex1, vertex2)
-        m = self.slope(vertex1, vertex2)
-        edge_to_insert = Edge(vertex=vertex2, weight=weight, m=m)
+        edge_to_insert = Edge(vertex=vertex2, weight=1)
         if vertex1 in self.graph:
             if edge_to_insert not in self.graph[vertex1] and vertex1 != vertex2:
                 self.graph[vertex1].append(edge_to_insert)
-                self.degrees[vertex1] += 1
         else:
             self.graph[vertex1] = [edge_to_insert]
-            self.degrees[vertex1] = 1
 
     def to_str(self):
         ordered_graph = sorted(self.graph.items(), key=lambda e: (e[0][0], e[0][1]))
@@ -434,14 +216,6 @@ class Graph:
 
         plt.subplot(2, 5, 2)
         plt.axis(axis_coords)
-        for sl in self.final:
-            xs = [sl.start[0], sl.end[0]]
-            ys = [sl.start[1], sl.end[1]]
-            plt.plot(xs, ys, c="gray")
-            plt.plot(sl.start[0], sl.start[1], "o", c="blue")
-            plt.plot(sl.end[0], sl.end[1], "o", c="blue")
-        for i in self.intersections:
-            plt.plot(i[0], i[1], "o", c="blue")
 
         for i, line in enumerate(self.lines):
             x_coords = [point[0] for point in line]
@@ -458,7 +232,7 @@ class Graph:
 if __name__ == "__main__":
     data = get_data()
     topo = Graph(data)
-    pprint(topo.final)
+    #pprint(topo.final)
     # pprint(topo.segment_map)
     # topo.clean_data2(0.5)
     # print("\nGraph:\n")
