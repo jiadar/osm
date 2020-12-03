@@ -1,0 +1,98 @@
+#!/bin/bash
+
+export REPO_ROOT=`git rev-parse --show-toplevel`
+cd $REPO_ROOT
+CMD=$1
+shift
+ARGS=$@
+
+case $CMD in
+    'psql') # Run psql prompt
+        PGPASSWORD=singlet psql -U singlet -h localhost
+        ;;
+    'pylint') # Run flake8 linters
+        pipenv run flake8 --config=s/flake8.ini pledgepay
+        ;;
+    'install') # Set up your dev environment
+        echo "PYTHONPATH=." >> .env
+        LDFLAGS='-L/usr/local/lib -L/usr/local/opt/openssl/lib -L/usr/local/opt/readline/lib' pipenv install
+        ;;
+    'py') # Run python from pipenv environment
+        pipenv run python $ARGS
+        ;;
+    'loc') # Count the lines of code
+        echo "Javascript / Typescript"
+        git ls-files | grep -v 'package-lock.json\|Pipfile.lock\|tachyons.css' | grep -I '\.ts\|\.jsx\|\.js\|\.jsx' | xargs wc -l | tail -1
+        echo "Python"
+        git ls-files | grep -v 'package-lock.json\|Pipfile.lock\|tachyons.css' | grep -I '\.py' | xargs wc -l | tail -1
+        echo "Other"
+        git ls-files | grep -v 'package-lock.json\|Pipfile.lock\|tachyons.css' | grep -v '\.py\|\.ts\|\.jsx\|\.js\|\.jsx' | xargs wc -l | tail -1
+        echo "All"
+        git ls-files | grep -v 'package-lock.json\|Pipfile.lock\|tachyons.css' | xargs wc -l | tail -1
+
+        ;;
+    'blacken') # Blacken python
+        black -l 112 pledgepay/server
+        black -l 112 pledgepay/queue
+        ;;
+    'build') # Build the python server binary
+        pipenv run python ./setup.py bdist_wheel > /dev/null 2>/dev/null
+        rm -rf build
+        [[ ! -d cloud/dist ]] && mkdir cloud/dist
+        rm cloud/dist/*
+        for f in `ls dist`
+        do
+            cp dist/$f cloud/dist/$f
+            echo "Built cloud/dist/$f"
+        done
+        rm -rf pledgepay.egg-info
+        rm -rf dist
+        ;;
+    'upload') # Upload server dist files to staging
+        if [ -z ${AWS_KEY+x} ]
+        then
+            echo "AWS key is not set"
+        else
+            rsync -avzhe "ssh -i $AWS_KEY" cloud/dist/* ubuntu@staging.pledgepay.io:~/dist
+        fi
+        ;;
+    'revision')
+        pipenv run alembic --config s/alembic.ini revision --autogenerate
+        ;;
+    'migrate') # Upgrade the db to current migrations
+        pipenv run alembic --config s/alembic.ini upgrade head
+        ;;
+    'deploy') # Deploy the server to staging
+        if [ -z ${AWS_KEY+x} ]
+        then
+            echo "AWS key is not set"
+        else
+            s/run build
+            ssh -i $AWS_KEY ubuntu@staging.pledgepay.io "rm -v dist/*"
+            s/run upload
+            ssh -i $AWS_KEY  ubuntu@staging.pledgepay.io ". prod/venv/bin/activate; pip uninstall -y pledgepay; pip install ~/dist/pledgepay-0.1.3-py3-none-any.whl | grep 'Successfully installed'"
+        fi
+        ;;
+    *)
+        echo "$CMD not found. Available commands:"
+        column -t -s : <<EOF
+blacken: Blacken python files
+build: build the python binary
+dc: Docker compose
+deploy: Deploy server app to staging
+drop: Drop all database tables
+ingest: Ingest the ridb to the local postgres from s/data/ridb
+install: Install dependencies from Pipfile
+lint: Run mypy and flake8 linters
+load: Load test data in the db
+migrate: Upgrade the db with migrations
+psql: Postgresql prompt
+py: Run python from pipenv environment
+pylint: Lint the python directories
+queue: Run the rabbitmq async task consumer
+revision: Create a new migration revision
+reset: Clean up after docker and start anew
+sync: Sync the database to the current app model (destructive)
+EOF
+        ;;
+    esac
