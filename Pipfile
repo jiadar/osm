@@ -8,9 +8,7 @@ alembic = "*"
 sqlalchemy = "*"
 flake8 = "*"
 psycopg2 = "*"
-numpy = "*"
 matplotlib = "*"
-utm = "*"
 
 [dev-packages]
 

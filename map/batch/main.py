@@ -1,11 +1,11 @@
 from functools import wraps
 import time
-from typing import Any
+from typing import Any, Tuple
 import json
 import matplotlib.pyplot as plt
 from pprint import pprint
-from queue import PriorityQueue, Queue
-import dataclasses
+import queue
+from dataclasses import dataclass
 
 plt.style.use("seaborn-whitegrid")
 axis_coords = [0, 6, 0, 6]
@@ -45,31 +45,18 @@ def timeit(my_func):
 
 
 def get_data():
-    with open("/Users/javin/work/osm/data/data2.json") as file:
+    with open("/Users/javin/work/osm/data/simpledata.json") as file:
         data = json.load(file)
     return data
 
 
-@dataclasses.dataclass
+Vertex = Tuple[float, float]
+
+
+@dataclass
 class Edge:
-    vertex: Any
-    m: float = 0
-    weight: float = 1
-
-
-@dataclasses.dataclass(order=True)
-class Waypoint:
-    distance: float
-    vertex: Any = dataclasses.field(compare=False)
-
-
-#    via: Any = dataclasses.field(compare=False)
-
-
-@dataclasses.dataclass(order=True)
-class Distance:
-    distance: float
-    vertex: Any = dataclasses.field(compare=False)
+    vertex: Vertex
+    weight: float = 0
 
 
 class Graph:
@@ -84,16 +71,16 @@ class Graph:
             for idx in range(len(line)):
                 self.add_vertex(line[idx])
                 if idx > 0:
-                    edge = (line[idx - 1], line[idx])
-                    self.add_edge(edge)
+                    vertex1, vertex2 = (line[idx - 1], line[idx])
+                    self.add_edge(vertex1, vertex2)
 
             line.reverse()
 
             for idx in range(len(line)):
                 self.add_vertex(line[idx])
                 if idx > 0:
-                    edge = (line[idx - 1], line[idx])
-                    self.add_edge(edge)
+                    vertex1, vertex2 = (line[idx - 1], line[idx])
+                    self.add_edge(vertex1, vertex2)
 
     @timeit
     def __init__(self, data):
@@ -107,16 +94,13 @@ class Graph:
         if vertex not in self.graph:
             self.graph[vertex] = []
 
-    def add_edge(self, edge):
-        if len(edge) < 2:
-            return
-        (vertex1, vertex2) = edge
-        edge_to_insert = Edge(vertex=vertex2, weight=1)
+    def add_edge(self, vertex1, vertex2, weight=1):
         if vertex1 in self.graph:
-            if edge_to_insert not in self.graph[vertex1] and vertex1 != vertex2:
-                self.graph[vertex1].append(edge_to_insert)
+            edge = Edge(vertex=vertex2, weight=weight)
+            if vertex2 not in self.graph[vertex1] and vertex1 != vertex2:
+                self.graph[vertex1].append(edge)
         else:
-            self.graph[vertex1] = [edge_to_insert]
+            self.graph[vertex1] = [edge]
 
     def to_str(self):
         ordered_graph = sorted(self.graph.items(), key=lambda e: (e[0][0], e[0][1]))
@@ -128,91 +112,34 @@ class Graph:
             p = p[:-2] + "\n"
         return p
 
-    def compute_weighted_path(self, start, goal):
-        q = []
-        for v in self.graph.keys():
-            if v == start:
-                q.append(Waypoint(distance=0.0, vertex=start))
-            else:
-                q.append(Waypoint(distance=99.0, vertex=v))
-        finished = Queue()
-        i = 0
-        DEBUG = False
-        print()
-        while len(q) > 0 and i < 99 and q[0].vertex != goal:
-            if i == 4:
-                DEBUG = False
-            q.sort(key=lambda e: e.distance)
-            u = q.pop(0)
-            print(f"Processing: {u}")
-            DEBUG and print(f"Adj: {self.graph[u.vertex]}")
-            for v in self.graph[u.vertex]:
-                # Check if v is in min heap
-                for idx, wp in enumerate(q):
-                    if wp.vertex == v.vertex:
-                        # if v is in min heap, and distance value is more than weight of u-v plus distance value of u
-                        DEBUG and print(
-                            f"Found: {wp.vertex} in heap with distance {wp.distance}"
-                        )
-                        this_distance = u.distance + v.weight
-                        DEBUG and print(
-                            f"Distance: {u.distance} + {v.weight} = {this_distance}"
-                        )
-                        if wp.distance > this_distance:
-                            DEBUG and print(f"Update: {wp.distance} > {this_distance}")
-                            # update the distance value of v
-                            new_wp = Waypoint(distance=this_distance, vertex=v.vertex)
-                            DEBUG and print(f"NewWp: {new_wp}")
-                            q[idx] = new_wp
-                        else:
-                            DEBUG and print(
-                                f"NoUpdate: {wp.distance} <= {this_distance}"
-                            )
-            i = i + 1
-
-        return q[0].distance
-
-    def compute_weighted_path2(self, start, goal):
-        q = PriorityQueue()
-        for v in self.graph.keys():
-            if v == start:
-                q.put(Waypoint(priority=0.0, vertex=start, via=None))
-            else:
-                q.put(Waypoint(priority=99.0, vertex=v, via=None))
-        finished = Queue()
-        i = 0
-        cur_wp = q.get()
-        while cur_wp.vertex != goal and not q.empty():
-            for neighbor in self.graph[cur_wp.vertex]:
-                next_priority = neighbor.priority + cur_wp.priority
-                next_wp = Waypoint(
-                    priority=next_priority, vertex=neighbor.vertex, via=cur_wp.vertex
-                )
-                q.put(next_wp)
-            finished.put(cur_wp)
-            cur_wp = q.get()
-            i = i + 1
-
-        print("PriorityQueue: ")
+    def bfs(self, start, goal):
+        q = queue.Queue()
+        discovered = [start]
+        q.put([start])
         while not q.empty():
-            print(q.get())
-        print("Finished Pile: ")
-        pprint.pprint(finished.queue)
-        print()
-
-        return finished
+            path = q.get()
+            v = path[-1]
+            if v == goal:
+                return path
+            for edge in self.graph[v]:
+                if edge.vertex not in discovered:
+                    discovered.append(edge.vertex)
+                    next_path = list(path)
+                    next_path.append(edge.vertex)
+                    q.put(next_path)
+        return []
 
     def plot(self, path=None):
         plt.figure(figsize=(16, 10))
         plt.subplot(2, 5, 1)
         plt.axis(axis_coords)
         colors = ["b", "g", "r", "k", "m", "y", "olive", "c"]
-        for vertex, edges in self.graph.items():
-            for edge in edges:
-                x_coords = [vertex[0], edge.vertex[0]]
-                y_coords = [vertex[1], edge.vertex[1]]
+        for vertex1, edges in self.graph.items():
+            for vertex2 in edges:
+                x_coords = [vertex1[0], vertex2[0]]
+                y_coords = [vertex1[1], vertex2[1]]
                 plt.plot(x_coords, y_coords, c="gray")
-            plt.plot(vertex[0], vertex[1], "o", c="blue")
+            plt.plot(vertex1[0], vertex1[1], "o", c="blue")
 
         plt.subplot(2, 5, 2)
         plt.axis(axis_coords)
@@ -232,6 +159,7 @@ class Graph:
 if __name__ == "__main__":
     data = get_data()
     topo = Graph(data)
+    # pprint(topo.graph)
     #pprint(topo.final)
     # pprint(topo.segment_map)
     # topo.clean_data2(0.5)
@@ -243,4 +171,15 @@ if __name__ == "__main__":
     # pprint.pprint(path)
 
     # plot(data, path)
-    topo.plot().show()
+    # topo.plot().show()
+    routes = {
+        (1, 3): [(5, 5), (2, 4), (2, 2)],
+        (2, 2): [(2, 4), (5, 5)],
+        (2, 4): [(2, 2), (5, 5)]
+    }
+    paths = []
+    for start, lst in routes.items():
+        for end in lst:
+            path = topo.bfs(start, end)
+            paths.append(path)
+    pprint(paths)
